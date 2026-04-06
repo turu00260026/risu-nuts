@@ -71,69 +71,80 @@ canvas.width = W; canvas.height = H;
 const SPEED = 185;
 const TIME = 30;
 const N = 10;
-const R_DELIVER = 42;
+const R_PICKUP = 40;
+const R_DELIVER = 48;
 const R_PLAYER = 20;
 
+// 5 recipient positions at screen edges
+const RECIPIENT_POSITIONS = [
+  { x: 88,  y: 105 },
+  { x: 632, y: 105 },
+  { x: 44,  y: 270 },
+  { x: 676, y: 270 },
+  { x: 360, y: 400 },
+];
+
 let state = 'start';
-let player, targets, trees, timeLeft, delivered, touchDest;
+let player, trees, timeLeft, delivered, touchDest;
+let hasNut = false;
+let nut = null;
+let recipients = [];
 let keys = {};
 let dpad = { x: 0, y: 0 };
 let lastTs = 0;
 let particles = [];
 
 function spawnParticles(x, y) {
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 10; i++) {
     const angle = Math.random() * Math.PI * 2;
-    const speed = 60 + Math.random() * 80;
+    const speed = 60 + Math.random() * 100;
     particles.push({
       x, y,
       vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed - 30,
+      vy: Math.sin(angle) * speed - 40,
       life: 1,
-      color: ['#f5c842','#ff8c00','#44cc44','#ffffff'][Math.floor(Math.random()*4)],
+      color: ['#f5c842','#ff8c00','#44cc44','#ffffff','#ff66cc'][Math.floor(Math.random()*5)],
       size: 5 + Math.random() * 6,
     });
   }
 }
 
+function spawnNut() {
+  let nx, ny, attempts = 0;
+  do {
+    nx = W/2 + (Math.random() - 0.5) * 160;
+    ny = H/2 + (Math.random() - 0.5) * 100;
+    attempts++;
+  } while (attempts < 100 && Math.hypot(nx - player.x, ny - player.y) < 50);
+  nut = { x: nx, y: ny };
+}
+
 function genLevel() {
-  targets = [];
   trees = [];
   particles = [];
-  const margin = 60;
 
-  let attempts = 0;
-  while (targets.length < N && attempts < 2000) {
-    attempts++;
-    const x = margin + Math.random() * (W - margin*2);
-    const y = 55 + margin*0.5 + Math.random() * (H - 55 - margin);
-    const minDist = targets.length < 5 ? 85 : 70; // relax after 5 placed
+  recipients = RECIPIENT_POSITIONS.map(p => ({
+    x: p.x, y: p.y,
+    celebrating: false,
+    celebTimer: 0,
+  }));
+
+  for (let i = 0; i < 14; i++) {
+    const x = 110 + Math.random() * (W - 220);
+    const y = 90 + Math.random() * (H - 170);
+    const r = 20 + Math.random() * 12;
     if (Math.hypot(x - W/2, y - H/2) < 70) continue;
-    if (targets.some(t => Math.hypot(t.x-x, t.y-y) < minDist)) continue;
-    targets.push({ x, y, done: false });
-  }
-  // Safety: fill remaining with any position if stuck
-  while (targets.length < N) {
-    targets.push({
-      x: margin + Math.random() * (W - margin*2),
-      y: 60 + Math.random() * (H - 120),
-      done: false,
-    });
-  }
-
-  for (let i = 0; i < 18; i++) {
-    const x = 35 + Math.random() * (W - 70);
-    const y = 55 + Math.random() * (H - 90);
-    const r = 22 + Math.random() * 14;
-    if (targets.some(t => Math.hypot(t.x-x, t.y-y) < r+52)) continue;
-    if (Math.hypot(x - W/2, y - H/2) < 65) continue;
+    if (recipients.some(rec => Math.hypot(rec.x - x, rec.y - y) < 90)) continue;
     trees.push({ x, y, r });
   }
 
   player = { x: W/2, y: H/2 };
   timeLeft = TIME;
   delivered = 0;
+  hasNut = false;
   touchDest = null;
+  nut = null;
+  spawnNut();
 }
 
 // ---- Drawing functions (no emoji) ----
@@ -144,7 +155,6 @@ function drawBG() {
   g.addColorStop(1, '#4e9c34');
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
-  // Subtle grass patches
   ctx.save();
   for (let i = 0; i < 28; i++) {
     const gx = (i * 139 + 30) % W;
@@ -159,10 +169,8 @@ function drawBG() {
 }
 
 function drawTree(t) {
-  // trunk
   ctx.fillStyle = '#6b4226';
   ctx.fillRect(t.x - 5, t.y + t.r*0.4, 10, t.r*0.65);
-  // canopy layers
   const colors = ['#2e7a18','#3a9020','#4aa82c'];
   [1.0, 0.72, 0.48].forEach((s, i) => {
     ctx.beginPath();
@@ -175,12 +183,10 @@ function drawTree(t) {
 function drawNut(x, y) {
   ctx.save();
   ctx.translate(x, y);
-  // Nut cap (green)
   ctx.beginPath();
   ctx.ellipse(0, -10, 9, 5, 0, 0, Math.PI*2);
   ctx.fillStyle = '#5a8030';
   ctx.fill();
-  // Nut body
   ctx.beginPath();
   ctx.ellipse(0, 0, 8, 11, 0, 0, Math.PI*2);
   ctx.fillStyle = '#8B4513';
@@ -188,7 +194,6 @@ function drawNut(x, y) {
   ctx.strokeStyle = '#5c2d0a';
   ctx.lineWidth = 1.5;
   ctx.stroke();
-  // Ridge
   ctx.beginPath();
   ctx.moveTo(-6, 0);
   ctx.lineTo(6, 0);
@@ -198,55 +203,20 @@ function drawNut(x, y) {
   ctx.restore();
 }
 
-function drawTarget(t) {
-  const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 380);
-
-  if (t.done) {
-    // Delivered: green glow + checkmark
-    ctx.save();
-    ctx.globalAlpha = 0.4;
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, 26, 0, Math.PI*2);
-    ctx.fillStyle = '#44ee44';
-    ctx.fill();
-    ctx.restore();
-
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, 18, 0, Math.PI*2);
-    ctx.fillStyle = '#22cc22';
-    ctx.fill();
-
-    // Checkmark
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 3;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(t.x - 8, t.y);
-    ctx.lineTo(t.x - 2, t.y + 7);
-    ctx.lineTo(t.x + 9, t.y - 7);
-    ctx.stroke();
-  } else {
-    // Pending: pulsing glow + nut
-    ctx.save();
-    ctx.globalAlpha = 0.3 * pulse;
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, 34, 0, Math.PI*2);
-    ctx.fillStyle = '#ffaa00';
-    ctx.fill();
-    ctx.restore();
-    // Nest base
-    ctx.beginPath();
-    ctx.arc(t.x, t.y, 20, 0, Math.PI*2);
-    ctx.fillStyle = '#7a4e28';
-    ctx.fill();
-    // Nut on nest
-    drawNut(t.x, t.y);
-  }
+function drawNutOnGround(n) {
+  const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 280);
+  ctx.save();
+  ctx.globalAlpha = 0.38 * pulse;
+  ctx.beginPath();
+  ctx.arc(n.x, n.y, 30, 0, Math.PI*2);
+  ctx.fillStyle = '#ffdd00';
+  ctx.fill();
+  ctx.restore();
+  drawNut(n.x, n.y);
 }
 
 function drawSquirrel(x, y) {
   ctx.save();
-  // Shadow
   ctx.globalAlpha = 0.25;
   ctx.beginPath();
   ctx.ellipse(x, y + 20, 14, 5, 0, 0, Math.PI*2);
@@ -254,7 +224,6 @@ function drawSquirrel(x, y) {
   ctx.fill();
   ctx.globalAlpha = 1;
 
-  // Tail (fluffy arc)
   ctx.strokeStyle = '#a06020';
   ctx.lineWidth = 11;
   ctx.lineCap = 'round';
@@ -269,26 +238,22 @@ function drawSquirrel(x, y) {
   ctx.quadraticCurveTo(x - 28, y - 5, x - 14, y - 22);
   ctx.stroke();
 
-  // Body
   ctx.beginPath();
   ctx.ellipse(x + 2, y + 9, 11, 14, 0, 0, Math.PI*2);
   ctx.fillStyle = '#b86018';
   ctx.fill();
 
-  // Head
   ctx.beginPath();
   ctx.arc(x + 2, y - 5, 12, 0, Math.PI*2);
   ctx.fillStyle = '#d07824';
   ctx.fill();
 
-  // Ears
   ctx.fillStyle = '#d07824';
   [[-7, -15],[8, -14]].forEach(([ex, ey]) => {
     ctx.beginPath();
     ctx.ellipse(x + ex, y + ey, 5, 7, ex < 0 ? -0.4 : 0.4, 0, Math.PI*2);
     ctx.fill();
   });
-  // Ear inner
   ctx.fillStyle = '#f0a060';
   [[-7, -15],[8, -14]].forEach(([ex, ey]) => {
     ctx.beginPath();
@@ -296,14 +261,12 @@ function drawSquirrel(x, y) {
     ctx.fill();
   });
 
-  // Eyes
   ctx.fillStyle = '#111';
   [[-3, -7],[6, -6]].forEach(([ex, ey]) => {
     ctx.beginPath();
     ctx.arc(x + ex, y + ey, 2.2, 0, Math.PI*2);
     ctx.fill();
   });
-  // Eye shine
   ctx.fillStyle = '#fff';
   [[-2, -8],[7, -7]].forEach(([ex, ey]) => {
     ctx.beginPath();
@@ -311,13 +274,11 @@ function drawSquirrel(x, y) {
     ctx.fill();
   });
 
-  // Nose
   ctx.fillStyle = '#884400';
   ctx.beginPath();
   ctx.arc(x + 1, y - 1, 1.8, 0, Math.PI*2);
   ctx.fill();
 
-  // Cheeks (chubby)
   ctx.save();
   ctx.globalAlpha = 0.25;
   ctx.fillStyle = '#ff8866';
@@ -328,6 +289,41 @@ function drawSquirrel(x, y) {
   });
   ctx.restore();
 
+  ctx.restore();
+}
+
+function drawRecipient(rec) {
+  // Celebration glow
+  if (rec.celebrating) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, rec.celebTimer / 1.5) * 0.65;
+    ctx.beginPath();
+    ctx.arc(rec.x, rec.y, 52, 0, Math.PI*2);
+    ctx.fillStyle = '#ffff44';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Nest (home) indicator above the squirrel
+  ctx.beginPath();
+  ctx.ellipse(rec.x, rec.y - 40, 16, 8, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#7a4e28';
+  ctx.fill();
+  // Arrow pointing down toward the squirrel
+  ctx.fillStyle = '#ffcc44';
+  ctx.beginPath();
+  ctx.moveTo(rec.x - 6, rec.y - 28);
+  ctx.lineTo(rec.x + 6, rec.y - 28);
+  ctx.lineTo(rec.x, rec.y - 20);
+  ctx.closePath();
+  ctx.fill();
+
+  // Recipient squirrel at 0.62 scale
+  ctx.save();
+  ctx.translate(rec.x, rec.y);
+  ctx.scale(0.62, 0.62);
+  ctx.translate(-rec.x, -rec.y);
+  drawSquirrel(rec.x, rec.y);
   ctx.restore();
 }
 
@@ -368,30 +364,32 @@ function drawHUD() {
   ctx.fill();
 
   const urgent = timeLeft <= 10;
-  ctx.font = 'bold 20px sans-serif';
+  ctx.font = 'bold 18px sans-serif';
   ctx.fillStyle = urgent ? '#ff5555' : '#ffffff';
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   ctx.fillText('TIME: ' + Math.ceil(timeLeft), 18, 29);
 
-  ctx.fillStyle = '#ffffff';
+  // Status: tell player what to do
+  ctx.font = 'bold 17px sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('NUTS: ' + delivered + ' / ' + N, W/2, 29);
+  if (hasNut) {
+    ctx.fillStyle = '#ffdd44';
+    ctx.fillText('ナッツを届けろ！', W/2, 29);
+  } else {
+    ctx.fillStyle = '#aaffaa';
+    ctx.fillText('ナッツを拾え！', W/2, 29);
+  }
 
-  // Progress bar
-  ctx.fillStyle = 'rgba(255,255,255,0.2)';
-  roundRect(W - 145, 16, 132, 11, 4);
-  ctx.fill();
-  ctx.fillStyle = '#ffcc00';
-  roundRect(W - 145, 16, 132 * (delivered/N), 11, 4);
-  ctx.fill();
+  // Count
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 18px sans-serif';
+  ctx.textAlign = 'right';
+  ctx.fillText(delivered + ' / ' + N, W - 18, 29);
 }
 
 function wrapText(text, maxWidth) {
-  // Split text into lines that fit maxWidth
-  const words = text.split('');
   const lines = [];
-  let line = '';
   for (const ch of text.split('\n')) {
     const parts = ch.split('');
     let cur = '';
@@ -407,25 +405,21 @@ function wrapText(text, maxWidth) {
 }
 
 function drawCanvasOverlay(title, lines, btnLabel) {
-  // Dark overlay
   ctx.fillStyle = 'rgba(10,40,5,0.88)';
   ctx.fillRect(0, 0, W, H);
 
-  // Title
-  ctx.font = 'bold 32px sans-serif';
+  ctx.font = 'bold 30px sans-serif';
   ctx.fillStyle = '#ffe066';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
   ctx.fillText(title, W/2, 40);
 
-  // Body lines
   ctx.font = '18px sans-serif';
   ctx.fillStyle = '#ffffff';
   lines.forEach((line, i) => {
-    ctx.fillText(line, W/2, 100 + i * 30);
+    ctx.fillText(line, W/2, 105 + i * 30);
   });
 
-  // Button
   const bw = 220, bh = 52, bx = W/2 - bw/2, by = H - 100;
   ctx.fillStyle = '#f5a623';
   roundRect(bx, by, bw, bh, 26);
@@ -443,9 +437,8 @@ function draw(dt) {
     drawCanvasOverlay(
       'のりすけのナッツお裾分け大作戦',
       [
-        '森の仲間の巣にナッツを届けよう！',
-        '光る巣を全部（10個）回ってね。',
-        '制限時間は 30秒 ！',
+        'ナッツを拾って、端っこにいるリスに届けよう！',
+        '10回届けたらクリア！制限時間は 30秒 ！',
         '',
         'PC: WASD / 矢印キー',
         'スマホ: 画面タップ or 下のボタン',
@@ -457,12 +450,12 @@ function draw(dt) {
 
   if (state === 'won' || state === 'lost') {
     trees.forEach(drawTree);
-    targets.forEach(drawTarget);
+    recipients.forEach(drawRecipient);
     drawSquirrel(player.x, player.y);
     const title = state === 'won' ? 'クリア！全部届けたよ！' : '時間切れ！';
     const lines = state === 'won'
       ? ['のりすけ最高！', '残り時間：' + Math.ceil(timeLeft) + '秒']
-      : [delivered + '個 / ' + N + '個 届けられたよ。', 'もう一回チャレンジ！'];
+      : [delivered + '回 / ' + N + '回 届けられたよ。', 'もう一回チャレンジ！'];
     drawCanvasOverlay(title, lines, 'もう一回！');
     return;
   }
@@ -480,8 +473,30 @@ function draw(dt) {
     ctx.restore();
   }
 
-  targets.forEach(drawTarget);
+  // Draw recipients
+  recipients.forEach(drawRecipient);
+
+  // Draw nut on ground (if player not carrying)
+  if (!hasNut && nut) {
+    drawNutOnGround(nut);
+  }
+
   drawSquirrel(player.x, player.y);
+
+  // Draw nut above player if carrying
+  if (hasNut) {
+    drawNut(player.x + 8, player.y - 28);
+    // Small glow
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath();
+    ctx.arc(player.x + 8, player.y - 28, 18, 0, Math.PI*2);
+    ctx.fillStyle = '#ffdd00';
+    ctx.fill();
+    ctx.restore();
+    drawNut(player.x + 8, player.y - 28);
+  }
+
   drawParticles(dt);
   drawHUD();
 }
@@ -522,12 +537,43 @@ function update(dt) {
   player.x = Math.max(R_PLAYER, Math.min(W - R_PLAYER, player.x));
   player.y = Math.max(R_PLAYER + 50, Math.min(H - R_PLAYER, player.y));
 
-  targets.forEach(t => {
-    if (!t.done && Math.hypot(t.x - player.x, t.y - player.y) < R_DELIVER) {
-      t.done = true;
-      delivered++;
-      spawnParticles(t.x, t.y);
-      if (delivered === N) endGame(true);
+  // Pickup nut
+  if (!hasNut && nut) {
+    if (Math.hypot(nut.x - player.x, nut.y - player.y) < R_PICKUP) {
+      hasNut = true;
+      nut = null;
+      touchDest = null;
+    }
+  }
+
+  // Deliver to recipient
+  if (hasNut) {
+    for (const rec of recipients) {
+      if (Math.hypot(rec.x - player.x, rec.y - player.y) < R_DELIVER) {
+        hasNut = false;
+        delivered++;
+        rec.celebrating = true;
+        rec.celebTimer = 1.5;
+        spawnParticles(rec.x, rec.y);
+        touchDest = null;
+        if (delivered >= N) {
+          endGame(true);
+        } else {
+          spawnNut();
+        }
+        break;
+      }
+    }
+  }
+
+  // Update celebration timers
+  recipients.forEach(rec => {
+    if (rec.celebrating) {
+      rec.celebTimer -= dt;
+      if (rec.celebTimer <= 0) {
+        rec.celebrating = false;
+        rec.celebTimer = 0;
+      }
     }
   });
 }
@@ -601,8 +647,6 @@ canvas.addEventListener('click', e => {
   btn.addEventListener('mouseup', off);
   btn.addEventListener('mouseleave', off);
 });
-
-// Start/restart handled via canvas tap (handleTap)
 
 requestAnimationFrame(ts => { lastTs = ts; requestAnimationFrame(loop); });
 </script>
