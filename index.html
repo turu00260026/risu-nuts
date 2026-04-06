@@ -89,6 +89,7 @@ let player, trees, timeLeft, delivered, touchDest;
 let hasNut = false;
 let nut = null;
 let recipients = [];
+let targetIdx = -1;  // which recipient to deliver to
 let keys = {};
 let dpad = { x: 0, y: 0 };
 let lastTs = 0;
@@ -117,6 +118,10 @@ function spawnNut() {
     attempts++;
   } while (attempts < 100 && Math.hypot(nx - player.x, ny - player.y) < 50);
   nut = { x: nx, y: ny };
+  // Randomly pick a target recipient (different from last if possible)
+  let next = Math.floor(Math.random() * recipients.length);
+  if (recipients.length > 1 && next === targetIdx) next = (next + 1) % recipients.length;
+  targetIdx = next;
 }
 
 function genLevel() {
@@ -144,6 +149,7 @@ function genLevel() {
   hasNut = false;
   touchDest = null;
   nut = null;
+  targetIdx = -1;
   spawnNut();
 }
 
@@ -292,7 +298,19 @@ function drawSquirrel(x, y) {
   ctx.restore();
 }
 
-function drawRecipient(rec) {
+function drawRecipient(rec, isTarget) {
+  // Target: big pulsing glow to show "deliver here!"
+  if (isTarget && !rec.celebrating) {
+    const pulse = 0.5 + 0.5 * Math.sin(Date.now() / 200);
+    ctx.save();
+    ctx.globalAlpha = 0.45 * pulse;
+    ctx.beginPath();
+    ctx.arc(rec.x, rec.y, 58, 0, Math.PI*2);
+    ctx.fillStyle = '#00eeff';
+    ctx.fill();
+    ctx.restore();
+  }
+
   // Celebration glow
   if (rec.celebrating) {
     ctx.save();
@@ -309,8 +327,9 @@ function drawRecipient(rec) {
   ctx.ellipse(rec.x, rec.y - 40, 16, 8, 0, 0, Math.PI*2);
   ctx.fillStyle = '#7a4e28';
   ctx.fill();
-  // Arrow pointing down toward the squirrel
-  ctx.fillStyle = '#ffcc44';
+
+  // Arrow: cyan if target, gray otherwise
+  ctx.fillStyle = isTarget ? '#00eeff' : '#888844';
   ctx.beginPath();
   ctx.moveTo(rec.x - 6, rec.y - 28);
   ctx.lineTo(rec.x + 6, rec.y - 28);
@@ -320,6 +339,7 @@ function drawRecipient(rec) {
 
   // Recipient squirrel at 0.62 scale
   ctx.save();
+  ctx.globalAlpha = isTarget ? 1.0 : 0.45;
   ctx.translate(rec.x, rec.y);
   ctx.scale(0.62, 0.62);
   ctx.translate(-rec.x, -rec.y);
@@ -450,7 +470,7 @@ function draw(dt) {
 
   if (state === 'won' || state === 'lost') {
     trees.forEach(drawTree);
-    recipients.forEach(drawRecipient);
+    recipients.forEach((rec, i) => drawRecipient(rec, false));
     drawSquirrel(player.x, player.y);
     const title = state === 'won' ? 'クリア！全部届けたよ！' : '時間切れ！';
     const lines = state === 'won'
@@ -473,8 +493,8 @@ function draw(dt) {
     ctx.restore();
   }
 
-  // Draw recipients
-  recipients.forEach(drawRecipient);
+  // Draw recipients (highlight the target one)
+  recipients.forEach((rec, i) => drawRecipient(rec, i === targetIdx));
 
   // Draw nut on ground (if player not carrying)
   if (!hasNut && nut) {
@@ -546,22 +566,20 @@ function update(dt) {
     }
   }
 
-  // Deliver to recipient
-  if (hasNut) {
-    for (const rec of recipients) {
-      if (Math.hypot(rec.x - player.x, rec.y - player.y) < R_DELIVER) {
-        hasNut = false;
-        delivered++;
-        rec.celebrating = true;
-        rec.celebTimer = 1.5;
-        spawnParticles(rec.x, rec.y);
-        touchDest = null;
-        if (delivered >= N) {
-          endGame(true);
-        } else {
-          spawnNut();
-        }
-        break;
+  // Deliver to target recipient only
+  if (hasNut && targetIdx >= 0) {
+    const rec = recipients[targetIdx];
+    if (Math.hypot(rec.x - player.x, rec.y - player.y) < R_DELIVER) {
+      hasNut = false;
+      delivered++;
+      rec.celebrating = true;
+      rec.celebTimer = 1.5;
+      spawnParticles(rec.x, rec.y);
+      touchDest = null;
+      if (delivered >= N) {
+        endGame(true);
+      } else {
+        spawnNut();
       }
     }
   }
