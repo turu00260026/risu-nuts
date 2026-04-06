@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>のりすけのナッツお裾分け大作戦</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: #1a3d05;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #wrap {
+    position: relative;
+    width: 100%;
+    max-width: 720px;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    border-radius: 14px;
+    box-shadow: 0 8px 40px rgba(0,0,0,0.6);
+  }
+  #overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.78);
+    border-radius: 14px;
+    color: white;
+    text-align: center;
+    padding: 24px;
+  }
+  #overlay h1 { font-size: clamp(18px,4vw,30px); margin-bottom:10px; font-family:sans-serif; }
+  #overlay p  { font-size: clamp(13px,2.5vw,17px); line-height:1.8; margin-bottom:22px; font-family:sans-serif; }
+  #overlay button {
+    background:#f5a623; color:white; border:none;
+    padding:14px 44px; font-size:clamp(16px,3vw,22px);
+    border-radius:50px; cursor:pointer; font-weight:bold;
+    font-family:sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #overlay button:active { opacity:0.85; }
+  .hidden { display:none !important; }
+  #dpad {
+    display: grid;
+    grid-template-areas: ". u ." "l . r" ". d .";
+    gap: 5px;
+    padding: 12px;
+    width: 186px;
+    margin-top: 10px;
+  }
+  .db {
+    width:54px; height:54px;
+    background:rgba(255,255,255,0.22);
+    border:none; border-radius:12px;
+    font-size:22px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+    color:white;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+  }
+  .db:active, .db.on { background:rgba(255,255,255,0.55); }
+  #bu { grid-area:u; } #bd { grid-area:d; }
+  #bl { grid-area:l; } #br { grid-area:r; }
+</style>
+</head>
+<body>
+<div id="wrap">
+  <canvas id="c" tabindex="0"></canvas>
+  <div id="overlay">
+    <h1>🐿️ のりすけのナッツお裾分け大作戦 🥜</h1>
+    <p>
+      森の仲間たちの巣に 🥜 を届けよう！<br>
+      光る巣を全部（10個）回ってね。<br>
+      制限時間は <strong>30秒</strong>！<br><br>
+      PC：WASD / 矢印キー<br>
+      スマホ：画面タップ or 下のボタン
+    </p>
+    <button id="btn">はじめる！🐿️</button>
+  </div>
+</div>
+<div id="dpad">
+  <button class="db" id="bu">▲</button>
+  <button class="db" id="bl">◀</button>
+  <button class="db" id="br">▶</button>
+  <button class="db" id="bd">▼</button>
+</div>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+const overlay = document.getElementById('overlay');
+const mainBtn = document.getElementById('btn');
+
+const W = 720, H = 430;
+canvas.width = W; canvas.height = H;
+
+const SPEED = 185;
+const TIME = 30;
+const N = 10;
+const R_DELIVER = 40;
+const R_PLAYER = 20;
+
+let state = 'start';
+let player, targets, trees, timeLeft, delivered, touchDest;
+let keys = {};
+let dpad = { x: 0, y: 0 };
+let lastTs = 0;
+
+// Particle effects
+let particles = [];
+
+function spawnParticles(x, y) {
+  for (let i = 0; i < 10; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 60 + Math.random() * 80;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 1,
+      emoji: Math.random() < 0.5 ? '🥜' : '✨',
+      size: 14 + Math.random() * 10,
+    });
+  }
+}
+
+function genLevel() {
+  targets = [];
+  trees = [];
+  particles = [];
+  const margin = 65;
+  const minTDist = 95;
+
+  while (targets.length < N) {
+    const x = margin + Math.random() * (W - margin*2);
+    const y = 55 + margin*0.5 + Math.random() * (H - 55 - margin);
+    if (Math.hypot(x - W/2, y - H/2) < 85) continue;
+    if (targets.some(t => Math.hypot(t.x-x, t.y-y) < minTDist)) continue;
+    targets.push({ x, y, done: false, scale: 1 });
+  }
+
+  for (let i = 0; i < 20; i++) {
+    const x = 35 + Math.random() * (W - 70);
+    const y = 55 + Math.random() * (H - 90);
+    const r = 22 + Math.random() * 14;
+    if (targets.some(t => Math.hypot(t.x-x, t.y-y) < r+50)) continue;
+    if (Math.hypot(x - W/2, y - H/2) < 65) continue;
+    trees.push({ x, y, r });
+  }
+
+  player = { x: W/2, y: H/2 };
+  timeLeft = TIME;
+  delivered = 0;
+  touchDest = null;
+}
+
+// Drawing
+function drawBG() {
+  const g = ctx.createLinearGradient(0, 0, W, H);
+  g.addColorStop(0, '#72c14a');
+  g.addColorStop(1, '#4e9c34');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // Subtle grass patches
+  ctx.save();
+  for (let i = 0; i < 28; i++) {
+    const gx = (i * 139 + 30) % W;
+    const gy = 55 + (i * 97 + 20) % (H - 70);
+    ctx.globalAlpha = 0.07;
+    ctx.beginPath();
+    ctx.ellipse(gx, gy, 22, 11, i*0.4, 0, Math.PI*2);
+    ctx.fillStyle = '#2a6010';
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+function drawTree(t) {
+  // trunk
+  ctx.fillStyle = '#6b4226';
+  ctx.fillRect(t.x - 5, t.y + t.r*0.4, 10, t.r*0.65);
+  // layers
+  const colors = ['#3a8a20','#48a82a','#5ac035'];
+  [1.0, 0.74, 0.50].forEach((s, i) => {
+    ctx.beginPath();
+    ctx.arc(t.x, t.y - t.r*0.08*i, t.r*s, 0, Math.PI*2);
+    ctx.fillStyle = colors[i];
+    ctx.fill();
+  });
+}
+
+function drawTarget(t) {
+  ctx.save();
+  if (t.done) {
+    ctx.globalAlpha = 0.5;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, 26, 0, Math.PI*2);
+    ctx.fillStyle = '#ffe066';
+    ctx.fill();
+    ctx.restore();
+    ctx.font = '26px serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✅', t.x, t.y);
+  } else {
+    // Pulsing glow
+    const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 380);
+    ctx.globalAlpha = 0.3 * pulse;
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, 34, 0, Math.PI*2);
+    ctx.fillStyle = '#ffbb00';
+    ctx.fill();
+    ctx.restore();
+
+    // Nest base
+    ctx.beginPath();
+    ctx.arc(t.x, t.y, 18, 0, Math.PI*2);
+    ctx.fillStyle = '#7a4e28';
+    ctx.fill();
+
+    ctx.font = `${20 * (t.scale||1)}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('🥜', t.x, t.y);
+  }
+}
+
+function drawPlayer() {
+  // shadow
+  ctx.save();
+  ctx.globalAlpha = 0.28;
+  ctx.beginPath();
+  ctx.ellipse(player.x, player.y + 18, 15, 6, 0, 0, Math.PI*2);
+  ctx.fillStyle = '#000';
+  ctx.fill();
+  ctx.restore();
+
+  ctx.font = '36px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('🐿️', player.x, player.y);
+}
+
+function drawParticles(dt) {
+  particles = particles.filter(p => p.life > 0);
+  particles.forEach(p => {
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 120 * dt;
+    p.life -= dt * 2.2;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.font = `${p.size}px serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(p.emoji, p.x, p.y);
+    ctx.restore();
+  });
+}
+
+function roundRect(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function drawHUD() {
+  // Background bar
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
+  roundRect(8, 8, W - 16, 42, 10);
+  ctx.fill();
+
+  // Timer
+  const urgent = timeLeft <= 10;
+  ctx.font = 'bold 20px sans-serif';
+  ctx.fillStyle = urgent ? '#ff4444' : '#ffffff';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const secs = Math.ceil(timeLeft);
+  ctx.fillText(`⏱ ${secs}秒`, 18, 29);
+
+  // Count
+  ctx.fillStyle = '#ffffff';
+  ctx.textAlign = 'center';
+  ctx.fillText(`🥜 ${delivered} / ${N}`, W/2, 29);
+
+  // Progress bar
+  ctx.fillStyle = 'rgba(255,255,255,0.18)';
+  roundRect(W - 145, 16, 132, 11, 4);
+  ctx.fill();
+  ctx.fillStyle = '#ffcc00';
+  roundRect(W - 145, 16, 132 * (delivered/N), 11, 4);
+  ctx.fill();
+}
+
+function draw(dt) {
+  drawBG();
+  trees.forEach(drawTree);
+
+  // Touch destination dot
+  if (touchDest && state === 'playing') {
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    ctx.beginPath();
+    ctx.arc(touchDest.x, touchDest.y, 14, 0, Math.PI*2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.restore();
+  }
+
+  targets.forEach(drawTarget);
+  drawPlayer();
+  drawParticles(dt);
+  if (state === 'playing') drawHUD();
+}
+
+function update(dt) {
+  if (state !== 'playing') return;
+
+  timeLeft -= dt;
+  if (timeLeft <= 0) {
+    timeLeft = 0;
+    endGame(false);
+    return;
+  }
+
+  // Movement
+  let dx = 0, dy = 0;
+  if (keys['ArrowLeft']  || keys['a'] || keys['A'] || dpad.x < 0) dx -= 1;
+  if (keys['ArrowRight'] || keys['d'] || keys['D'] || dpad.x > 0) dx += 1;
+  if (keys['ArrowUp']    || keys['w'] || keys['W'] || dpad.y < 0) dy -= 1;
+  if (keys['ArrowDown']  || keys['s'] || keys['S'] || dpad.y > 0) dy += 1;
+
+  if (dx !== 0 || dy !== 0) {
+    touchDest = null;
+    const len = Math.hypot(dx, dy);
+    player.x += (dx/len) * SPEED * dt;
+    player.y += (dy/len) * SPEED * dt;
+  } else if (touchDest) {
+    const tdx = touchDest.x - player.x;
+    const tdy = touchDest.y - player.y;
+    const dist = Math.hypot(tdx, tdy);
+    if (dist < 6) {
+      touchDest = null;
+    } else {
+      player.x += (tdx/dist) * SPEED * dt;
+      player.y += (tdy/dist) * SPEED * dt;
+    }
+  }
+
+  // Bounds
+  player.x = Math.max(R_PLAYER, Math.min(W - R_PLAYER, player.x));
+  player.y = Math.max(R_PLAYER + 50, Math.min(H - R_PLAYER, player.y));
+
+  // Delivery check
+  targets.forEach(t => {
+    if (!t.done && Math.hypot(t.x - player.x, t.y - player.y) < R_DELIVER) {
+      t.done = true;
+      delivered++;
+      spawnParticles(t.x, t.y);
+      if (delivered === N) endGame(true);
+    }
+  });
+}
+
+function endGame(won) {
+  state = won ? 'won' : 'lost';
+  const h1 = overlay.querySelector('h1');
+  const p  = overlay.querySelector('p');
+  if (won) {
+    h1.textContent = '🎉 全部届けたよ！ 🎉';
+    p.innerHTML = `のりすけ最高！<br>森のみんなが喜んでるよ 🐿️🥜<br><br>残り時間：${Math.ceil(timeLeft)}秒`;
+  } else {
+    h1.textContent = '⏰ 時間切れ！';
+    p.innerHTML = `${delivered}個 / ${N}個 届けられたよ。<br>もう一回チャレンジ！🐿️`;
+  }
+  mainBtn.textContent = 'もう一回！🐿️';
+  overlay.classList.remove('hidden');
+}
+
+// Game loop
+function loop(ts) {
+  const dt = Math.min((ts - lastTs) / 1000, 0.05);
+  lastTs = ts;
+  update(dt);
+  draw(dt);
+  requestAnimationFrame(loop);
+}
+
+// Input
+document.addEventListener('keydown', e => {
+  keys[e.key] = true;
+  if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' '].includes(e.key)) e.preventDefault();
+});
+document.addEventListener('keyup', e => { keys[e.key] = false; });
+
+function canvasToGame(cx, cy) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: cx * (W / rect.width),
+    y: cy * (H / rect.height),
+  };
+}
+
+canvas.addEventListener('touchstart', e => {
+  e.preventDefault();
+  if (state !== 'playing') return;
+  const t = e.touches[0];
+  const r = canvas.getBoundingClientRect();
+  touchDest = canvasToGame(t.clientX - r.left, t.clientY - r.top);
+}, { passive: false });
+
+canvas.addEventListener('touchmove', e => {
+  e.preventDefault();
+  if (state !== 'playing') return;
+  const t = e.touches[0];
+  const r = canvas.getBoundingClientRect();
+  touchDest = canvasToGame(t.clientX - r.left, t.clientY - r.top);
+}, { passive: false });
+
+canvas.addEventListener('click', e => {
+  if (state !== 'playing') return;
+  const r = canvas.getBoundingClientRect();
+  touchDest = canvasToGame(e.clientX - r.left, e.clientY - r.top);
+});
+
+// D-pad
+[['bu',0,-1],['bd',0,1],['bl',-1,0],['br',1,0]].forEach(([id,x,y]) => {
+  const btn = document.getElementById(id);
+  const on = (e) => { e.preventDefault(); dpad.x=x; dpad.y=y; btn.classList.add('on'); };
+  const off = () => { dpad={x:0,y:0}; btn.classList.remove('on'); };
+  btn.addEventListener('touchstart', on, {passive:false});
+  btn.addEventListener('touchend', off);
+  btn.addEventListener('mousedown', on);
+  btn.addEventListener('mouseup', off);
+  btn.addEventListener('mouseleave', off);
+});
+
+// Start / Restart button
+mainBtn.addEventListener('click', () => {
+  genLevel();
+  state = 'playing';
+  overlay.classList.add('hidden');
+  canvas.focus();
+});
+
+// Kick off loop
+requestAnimationFrame(ts => { lastTs = ts; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
