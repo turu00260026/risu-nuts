@@ -70,7 +70,6 @@ canvas.width = W; canvas.height = H;
 
 const SPEED = 185;
 const TIME = 30;
-const N = 10;
 const R_PICKUP = 40;
 const R_DELIVER = 48;
 const R_PLAYER = 20;
@@ -401,11 +400,11 @@ function drawHUD() {
     ctx.fillText('ナッツを拾え！', W/2, 29);
   }
 
-  // Count
+  // Score
   ctx.fillStyle = '#ffffff';
   ctx.font = 'bold 18px sans-serif';
   ctx.textAlign = 'right';
-  ctx.fillText(delivered + ' / ' + N, W - 18, 29);
+  ctx.fillText(delivered + '個', W - 18, 29);
 }
 
 function wrapText(text, maxWidth) {
@@ -457,8 +456,8 @@ function draw(dt) {
     drawCanvasOverlay(
       'のりすけのナッツお裾分け大作戦',
       [
-        'ナッツを拾って、端っこにいるリスに届けよう！',
-        '10回届けたらクリア！制限時間は 30秒 ！',
+        'ナッツを拾って、光ってるリスに届けよう！',
+        '30秒で何個届けられるかな？',
         '',
         'PC: WASD / 矢印キー',
         'スマホ: 画面タップ or 下のボタン',
@@ -468,15 +467,14 @@ function draw(dt) {
     return;
   }
 
-  if (state === 'won' || state === 'lost') {
+  if (state === 'lost') {
     trees.forEach(drawTree);
     recipients.forEach((rec, i) => drawRecipient(rec, false));
     drawSquirrel(player.x, player.y);
-    const title = state === 'won' ? 'クリア！全部届けたよ！' : '時間切れ！';
-    const lines = state === 'won'
-      ? ['のりすけ最高！', '残り時間：' + Math.ceil(timeLeft) + '秒']
-      : [delivered + '回 / ' + N + '回 届けられたよ。', 'もう一回チャレンジ！'];
-    drawCanvasOverlay(title, lines, 'もう一回！');
+    const lines = delivered === 0
+      ? ['0個か…練習あるのみ！', 'もう一回！']
+      : [delivered + '個届けたよ！', delivered >= 8 ? 'のりすけ天才！！' : delivered >= 5 ? 'なかなかやるじゃん！' : 'もう一回チャレンジ！'];
+    drawCanvasOverlay('時間切れ！', lines, 'もう一回！');
     return;
   }
 
@@ -527,7 +525,7 @@ function update(dt) {
   timeLeft -= dt;
   if (timeLeft <= 0) {
     timeLeft = 0;
-    endGame(false);
+    endGame();
     return;
   }
 
@@ -576,11 +574,7 @@ function update(dt) {
       rec.celebTimer = 1.5;
       spawnParticles(rec.x, rec.y);
       touchDest = null;
-      if (delivered >= N) {
-        endGame(true);
-      } else {
-        spawnNut();
-      }
+      spawnNut();
     }
   }
 
@@ -596,8 +590,8 @@ function update(dt) {
   });
 }
 
-function endGame(won) {
-  state = won ? 'won' : 'lost';
+function endGame() {
+  state = 'lost';
 }
 
 function loop(ts) {
@@ -624,7 +618,7 @@ function canvasToGame(cx, cy) {
 }
 
 function handleTap(cx, cy) {
-  if (state === 'start' || state === 'won' || state === 'lost') {
+  if (state === 'start' || state === 'lost') {
     genLevel();
     state = 'playing';
     return;
