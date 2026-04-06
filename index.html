@@ -28,15 +28,14 @@
     box-shadow: 0 8px 40px rgba(0,0,0,0.6);
   }
   #overlay {
-    position: absolute;
+    position: fixed;
     inset: 0;
-    z-index: 10;
+    z-index: 9999;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    background: rgba(0,0,0,0.78);
-    border-radius: 14px;
+    background: rgba(20,60,5,0.92);
     color: white;
     text-align: center;
     padding: 24px;
@@ -78,17 +77,17 @@
 <body>
 <div id="wrap">
   <canvas id="c"></canvas>
-  <div id="overlay">
-    <h1>&#x1F43F; のりすけのナッツお裾分け大作戦 &#x1F95C;</h1>
-    <p>
-      森の仲間たちの巣にナッツを届けよう！<br>
-      光る巣を全部（10個）回ってね。<br>
-      制限時間は <strong>30秒</strong>！<br><br>
-      PC：WASD / 矢印キー<br>
-      スマホ：画面タップ or 下のボタン
-    </p>
-    <button id="btn">はじめる！</button>
-  </div>
+</div>
+<div id="overlay">
+  <h1>&#x1F43F; のりすけのナッツお裾分け大作戦 &#x1F95C;</h1>
+  <p>
+    森の仲間たちの巣にナッツを届けよう！<br>
+    光る巣を全部（10個）回ってね。<br>
+    制限時間は <strong>30秒</strong>！<br><br>
+    PC：WASD / 矢印キー<br>
+    スマホ：画面タップ or 下のボタン
+  </p>
+  <button id="btn">はじめる！</button>
 </div>
 <div id="dpad">
   <button class="db" id="bu">&#x25B2;</button>
