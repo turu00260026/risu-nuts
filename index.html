@@ -426,6 +426,18 @@ function drawHUD() {
 
 function draw(dt) {
   drawBG();
+
+  // DEBUG: show state info on canvas
+  ctx.fillStyle = 'rgba(0,0,0,0.6)';
+  ctx.fillRect(0, H-30, W, 30);
+  ctx.fillStyle = '#fff';
+  ctx.font = '14px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  const tLen = targets ? targets.length : 'null';
+  const trLen = trees ? trees.length : 'null';
+  ctx.fillText('state:' + state + ' targets:' + tLen + ' trees:' + trLen + ' px:' + Math.round(player ? player.x : -1), 8, H-15);
+
   trees.forEach(drawTree);
 
   if (touchDest && state === 'playing') {
