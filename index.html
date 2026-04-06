@@ -137,15 +137,25 @@ function genLevel() {
   targets = [];
   trees = [];
   particles = [];
-  const margin = 65;
-  const minTDist = 95;
+  const margin = 60;
 
-  while (targets.length < N) {
+  let attempts = 0;
+  while (targets.length < N && attempts < 2000) {
+    attempts++;
     const x = margin + Math.random() * (W - margin*2);
     const y = 55 + margin*0.5 + Math.random() * (H - 55 - margin);
-    if (Math.hypot(x - W/2, y - H/2) < 85) continue;
-    if (targets.some(t => Math.hypot(t.x-x, t.y-y) < minTDist)) continue;
+    const minDist = targets.length < 5 ? 85 : 70; // relax after 5 placed
+    if (Math.hypot(x - W/2, y - H/2) < 70) continue;
+    if (targets.some(t => Math.hypot(t.x-x, t.y-y) < minDist)) continue;
     targets.push({ x, y, done: false });
+  }
+  // Safety: fill remaining with any position if stuck
+  while (targets.length < N) {
+    targets.push({
+      x: margin + Math.random() * (W - margin*2),
+      y: 60 + Math.random() * (H - 120),
+      done: false,
+    });
   }
 
   for (let i = 0; i < 18; i++) {
