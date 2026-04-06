@@ -27,30 +27,6 @@
     border-radius: 14px;
     box-shadow: 0 8px 40px rgba(0,0,0,0.6);
   }
-  #overlay {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    background: rgba(20,60,5,0.92);
-    color: white;
-    text-align: center;
-    padding: 24px;
-  }
-  #overlay h1 { font-size: clamp(18px,4vw,30px); margin-bottom:10px; font-family:sans-serif; }
-  #overlay p  { font-size: clamp(13px,2.5vw,17px); line-height:1.8; margin-bottom:22px; font-family:sans-serif; }
-  #overlay button {
-    background:#f5a623; color:white; border:none;
-    padding:14px 44px; font-size:clamp(16px,3vw,22px);
-    border-radius:50px; cursor:pointer; font-weight:bold;
-    font-family:sans-serif;
-    -webkit-tap-highlight-color: transparent;
-  }
-  #overlay button:active { opacity:0.85; }
-  .hidden { display:none !important; }
   #dpad {
     display: grid;
     grid-template-areas: ". u ." "l . r" ". d .";
@@ -78,17 +54,6 @@
 <div id="wrap">
   <canvas id="c"></canvas>
 </div>
-<div id="overlay">
-  <h1>&#x1F43F; のりすけのナッツお裾分け大作戦 &#x1F95C;</h1>
-  <p>
-    森の仲間たちの巣にナッツを届けよう！<br>
-    光る巣を全部（10個）回ってね。<br>
-    制限時間は <strong>30秒</strong>！<br><br>
-    PC：WASD / 矢印キー<br>
-    スマホ：画面タップ or 下のボタン
-  </p>
-  <button id="btn">はじめる！</button>
-</div>
 <div id="dpad">
   <button class="db" id="bu">&#x25B2;</button>
   <button class="db" id="bl">&#x25C0;</button>
@@ -99,8 +64,6 @@
 <script>
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
-const overlay = document.getElementById('overlay');
-const mainBtn = document.getElementById('btn');
 
 const W = 720, H = 430;
 canvas.width = W; canvas.height = H;
@@ -424,23 +387,90 @@ function drawHUD() {
   ctx.fill();
 }
 
+function wrapText(text, maxWidth) {
+  // Split text into lines that fit maxWidth
+  const words = text.split('');
+  const lines = [];
+  let line = '';
+  for (const ch of text.split('\n')) {
+    const parts = ch.split('');
+    let cur = '';
+    for (const c of parts) {
+      const test = cur + c;
+      if (ctx.measureText(test).width > maxWidth && cur.length > 0) {
+        lines.push(cur); cur = c;
+      } else { cur = test; }
+    }
+    if (cur) lines.push(cur);
+  }
+  return lines;
+}
+
+function drawCanvasOverlay(title, lines, btnLabel) {
+  // Dark overlay
+  ctx.fillStyle = 'rgba(10,40,5,0.88)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Title
+  ctx.font = 'bold 32px sans-serif';
+  ctx.fillStyle = '#ffe066';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.fillText(title, W/2, 40);
+
+  // Body lines
+  ctx.font = '18px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  lines.forEach((line, i) => {
+    ctx.fillText(line, W/2, 100 + i * 30);
+  });
+
+  // Button
+  const bw = 220, bh = 52, bx = W/2 - bw/2, by = H - 100;
+  ctx.fillStyle = '#f5a623';
+  roundRect(bx, by, bw, bh, 26);
+  ctx.fill();
+  ctx.font = 'bold 22px sans-serif';
+  ctx.fillStyle = '#ffffff';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(btnLabel, W/2, by + bh/2);
+}
+
 function draw(dt) {
   drawBG();
 
-  // DEBUG: show state info on canvas
-  ctx.fillStyle = 'rgba(0,0,0,0.6)';
-  ctx.fillRect(0, H-30, W, 30);
-  ctx.fillStyle = '#fff';
-  ctx.font = '14px sans-serif';
-  ctx.textAlign = 'left';
-  ctx.textBaseline = 'middle';
-  const tLen = targets ? targets.length : 'null';
-  const trLen = trees ? trees.length : 'null';
-  ctx.fillText('state:' + state + ' targets:' + tLen + ' trees:' + trLen + ' px:' + Math.round(player ? player.x : -1), 8, H-15);
+  if (state === 'start') {
+    drawCanvasOverlay(
+      'のりすけのナッツお裾分け大作戦',
+      [
+        '森の仲間の巣にナッツを届けよう！',
+        '光る巣を全部（10個）回ってね。',
+        '制限時間は 30秒 ！',
+        '',
+        'PC: WASD / 矢印キー',
+        'スマホ: 画面タップ or 下のボタン',
+      ],
+      'はじめる！'
+    );
+    return;
+  }
 
+  if (state === 'won' || state === 'lost') {
+    trees.forEach(drawTree);
+    targets.forEach(drawTarget);
+    drawSquirrel(player.x, player.y);
+    const title = state === 'won' ? 'クリア！全部届けたよ！' : '時間切れ！';
+    const lines = state === 'won'
+      ? ['のりすけ最高！', '残り時間：' + Math.ceil(timeLeft) + '秒']
+      : [delivered + '個 / ' + N + '個 届けられたよ。', 'もう一回チャレンジ！'];
+    drawCanvasOverlay(title, lines, 'もう一回！');
+    return;
+  }
+
+  // state === 'playing'
   trees.forEach(drawTree);
 
-  if (touchDest && state === 'playing') {
+  if (touchDest) {
     ctx.save();
     ctx.globalAlpha = 0.3;
     ctx.beginPath();
@@ -453,7 +483,7 @@ function draw(dt) {
   targets.forEach(drawTarget);
   drawSquirrel(player.x, player.y);
   drawParticles(dt);
-  if (state === 'playing') drawHUD();
+  drawHUD();
 }
 
 function update(dt) {
@@ -504,17 +534,6 @@ function update(dt) {
 
 function endGame(won) {
   state = won ? 'won' : 'lost';
-  const h1 = overlay.querySelector('h1');
-  const p  = overlay.querySelector('p');
-  if (won) {
-    h1.textContent = 'クリア！全部届けたよ！';
-    p.innerHTML = 'のりすけ最高！<br>森のみんなが喜んでるよ！<br><br>残り時間：' + Math.ceil(timeLeft) + '秒';
-  } else {
-    h1.textContent = '時間切れ！';
-    p.innerHTML = delivered + '個 / ' + N + '個 届けられたよ。<br>もう一回チャレンジ！';
-  }
-  mainBtn.textContent = 'もう一回！';
-  overlay.classList.remove('hidden');
 }
 
 function loop(ts) {
@@ -540,12 +559,22 @@ function canvasToGame(cx, cy) {
   };
 }
 
+function handleTap(cx, cy) {
+  if (state === 'start' || state === 'won' || state === 'lost') {
+    genLevel();
+    state = 'playing';
+    return;
+  }
+  if (state === 'playing') {
+    touchDest = canvasToGame(cx, cy);
+  }
+}
+
 canvas.addEventListener('touchstart', e => {
   e.preventDefault();
-  if (state !== 'playing') return;
   const t = e.touches[0];
   const r = canvas.getBoundingClientRect();
-  touchDest = canvasToGame(t.clientX - r.left, t.clientY - r.top);
+  handleTap(t.clientX - r.left, t.clientY - r.top);
 }, { passive: false });
 
 canvas.addEventListener('touchmove', e => {
@@ -557,9 +586,8 @@ canvas.addEventListener('touchmove', e => {
 }, { passive: false });
 
 canvas.addEventListener('click', e => {
-  if (state !== 'playing') return;
   const r = canvas.getBoundingClientRect();
-  touchDest = canvasToGame(e.clientX - r.left, e.clientY - r.top);
+  handleTap(e.clientX - r.left, e.clientY - r.top);
 });
 
 // D-pad
@@ -574,11 +602,7 @@ canvas.addEventListener('click', e => {
   btn.addEventListener('mouseleave', off);
 });
 
-mainBtn.addEventListener('click', () => {
-  genLevel();
-  state = 'playing';
-  overlay.classList.add('hidden');
-});
+// Start/restart handled via canvas tap (handleTap)
 
 requestAnimationFrame(ts => { lastTs = ts; requestAnimationFrame(loop); });
 </script>
